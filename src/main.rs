@@ -32,8 +32,8 @@ fn main() -> std::io::Result<()> {
     b.join().unwrap();
     c.join().unwrap();
     return Ok(()); */
-    server();
-
+    let threat = thread::spawn(||server());
+    threat.join();
     Ok(())
 }
 
@@ -79,6 +79,7 @@ fn server() -> std::io::Result<()> {
     let mut server = Arc::new(Mutex::new(server));
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     let mut id = 0usize;
+    thread::spawn(||write(rx, server));
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -102,6 +103,21 @@ fn server() -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+fn write(rx: Receiver<String>, server: &Server) {
+    let a = rx.recv();
+    match a {
+        Ok(val) => {
+            for client in &server.clients {
+                let mut stream = client.stream.lock().unwrap();
+                let b = stream.write(val.as_bytes());
+            }
+        },
+        Err(err) => {
+            println!("{err}");
+        }
+    }
 }
 
 fn run_client(client: Client, server: Arc<Mutex<Server>>) {
