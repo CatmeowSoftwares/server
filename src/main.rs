@@ -39,18 +39,15 @@ fn main() -> std::io::Result<()> {
 
 struct Server {
     clients: Vec<Client>,
-    sender: Sender<String>,
-    receiver: Receiver<String>,
 }
 
 struct Client {
     stream: Arc<Mutex<TcpStream>>,
 }
 impl Client {
-    fn new(stream: TcpStream) -> Self {
-        let s = Arc::new(Mutex::new(stream));
+    fn new(stream: Arc<Mutex<TcpStream>>) -> Self {
         Self {
-            stream: s,
+            stream: stream,
         }
     }
     fn run() {
@@ -62,16 +59,7 @@ impl Server {
         let (tx, rx) = mpsc::channel::<String>();
         Self {
             clients: Vec::new(),
-            sender: tx, 
-            receiver: rx,
         }
-    }
-    fn add(&mut self, stream: TcpStream) {
-        self.clients.push(Client::new(stream));
-    }
-
-    fn send(&self, msg: impl Into<String>) {
-        self.sender.send(msg.into());
     }
 }
 fn server() -> std::io::Result<()> {
@@ -79,20 +67,47 @@ fn server() -> std::io::Result<()> {
     let mut server = Arc::new(Mutex::new(server));
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     let mut id = 0usize;
-    thread::spawn(||write(rx, server));
+    let (sender, receiver) = mpsc::channel();
+    let cloned_server = Arc::clone(&server);
+    thread::spawn(move ||write(&receiver, &cloned_server));
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
+            Ok(mut stream) => {
+                let cloned_server_again = Arc::clone(&server);
+                let not_mutable_server = cloned_server_again.lock().unwrap();
+                let mut server = not_mutable_server;
+                let arc_stream = Arc::new(Mutex::new(stream));
+                let cloned_arc_stream = Arc::clone(&arc_stream);
+                server.clients.push(Client::new(arc_stream));
                 //let client = Arc::new(Mutex::new(Client::new(stream)));
                 println!("someone connected!");
-                let s = server.lock();
-                s.unwrap().clients.push(Client::new(stream));
-                let server = Arc::clone(&server);
-                let server2 = Arc::clone(&server);
+                let sender = sender.clone();
+                let _ = thread::spawn(move ||{
+                    let mut stream = cloned_arc_stream.lock().unwrap();
+                    let mut read = [0u8; 1024];
+                    match stream.read(&mut read) {
+                        Ok(val) => {
+                            let bytes = read.bytes();
+                            //stream.write(&read[0..val]);
+                            let string_thing = String::from_utf8_lossy(&read);
+                            let string = string_thing.to_string();
+                            println!("{}", string);
+                            let res = sender.send(string);
+                            match res {
+                                Ok(val) => {
+                                    println!("success!!!!");
+                                }
+                                Err(err) => {
+                                    println!("there was an error: {}", err);
+                                }
+                            }
 
-                let _ = thread::spawn(move || handle_client_read(id,Arc::clone(&server)));
-
-                let _ = thread::spawn(move || handle_client_write(id,Arc::clone(&server2)));
+                        },
+                        Err(err) => {
+                            
+                        }
+                    }
+                });
                 id += 1;
                 //handle_client(stream);
             }
@@ -105,24 +120,29 @@ fn server() -> std::io::Result<()> {
     Ok(())
 }
 
-fn write(rx: Receiver<String>, server: &Server) {
-    let a = rx.recv();
-    match a {
-        Ok(val) => {
-            for client in &server.clients {
-                let mut stream = client.stream.lock().unwrap();
-                let b = stream.write(val.as_bytes());
+fn write(rx: &Receiver<String>, server: &Arc<Mutex<Server>>) {
+    loop {
+
+        let a = rx.recv();
+        match a {
+            Ok(val) => {
+                let server = server.lock().unwrap();
+                println!("works!: {val}");
+                for client in &server.clients {
+                    let mut stream = client.stream.lock().unwrap();
+                    let b = stream.write(val.as_bytes());
+                }
+            },
+            Err(err) => {
+                println!("{err}");
             }
-        },
-        Err(err) => {
-            println!("{err}");
         }
     }
+
 }
 
 fn run_client(client: Client, server: Arc<Mutex<Server>>) {
     let server = server.lock().unwrap();
-    let tx = &server.sender;
     let stream = Arc::clone(&client.stream);
     let mut stream = stream.lock().unwrap();
     // read 20 bytes at a time from stream echoing back to stream
@@ -139,7 +159,6 @@ fn run_client(client: Client, server: Arc<Mutex<Server>>) {
                 }
                 stream.write(&read[0..n]).unwrap();
                 let string_thing = String::from_utf8_lossy(&read);
-                let a = tx.send(string_thing.to_string());
                 /*
                 match a {
                     Ok(val) => {}
@@ -172,7 +191,6 @@ fn handle_client_read(client_id: usize, server: Arc<Mutex<Server>>) {
         let server = server.lock().unwrap();
         let client = &server.clients[client_id];
         let mut stream = client.stream.lock().unwrap();
-        let tx = &server.sender;
         match stream.read(&mut read) {
             Ok(n) => {
                 if n == 0 {
@@ -183,13 +201,6 @@ fn handle_client_read(client_id: usize, server: Arc<Mutex<Server>>) {
                 }
                 stream.write(&read[0..n]).unwrap();
                 let string_thing = String::from_utf8_lossy(&read);
-                let a = tx.send(string_thing.to_string());
-                match a {
-                    Ok(val) => {}
-                    Err(err) => {
-                        println!("error! {}", err);
-                    }
-                }
 
                 println!(r#"{}"#, string_thing);
             }
@@ -201,21 +212,3 @@ fn handle_client_read(client_id: usize, server: Arc<Mutex<Server>>) {
     }
 }
 
-fn handle_client_write(client_id: usize, server: Arc<Mutex<Server>>) {
-
-    let server = server.lock().unwrap();
-    let client = &server.clients[client_id];
-    let a = &server.receiver;
-    let mut stream = client.stream.lock().unwrap();
-
-    let r = a.recv();
-    match r {
-        Ok(val) => {
-            let a = val;
-            stream.write(&a.as_bytes()).unwrap();
-        }
-        Err(err) => {
-            println!("{}", err);
-        }
-    }
-}
