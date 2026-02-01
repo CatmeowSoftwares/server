@@ -4,20 +4,16 @@ use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{self, TcpListener, TcpSocke
 
 
 
-
-
-
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    
     let a = TcpListener::bind("127.0.0.1:8080").await?;
     let a2 = Arc::new(Mutex::new(UdpSocket::bind("127.0.0.1:8080").await?));
     let (tx, _) = broadcast::channel::<String>(16);
     let sock = Arc::clone(&a2);
     let players: Vec::<Player> = Vec::new();
     loop {
-        let mut rx2 = tx.subscribe();
         
-
         let (mut stream, addr) = a.accept().await?;
 
         let tx = tx.clone();
