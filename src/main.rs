@@ -117,6 +117,34 @@ async fn main() -> Result<(), Error> {
                     println!("disconected!!!!!");
                     break;
                 }
+                let _data = &v[1..bytes];
+                match RequestType::try_from(v[0]).unwrap() {
+                    RequestType::ChatSend => todo!(),
+                    RequestType::ChatRemove => todo!(),
+                    RequestType::GetPlayerPos => {
+
+
+
+                    },
+                    RequestType::SetPlayerPos => {
+                        // [255, 255, 255, 255, 255, 255, 255]
+                        //   ^    ^   ^..
+                        //  msgt id   pos
+                        let data2 = &_data[1..2];
+                        let data3 = data2.try_into().unwrap();
+                        let a = u16::from_le_bytes(data3);
+                        let id = _data[1];
+                        let mut player = players.get_mut(id as usize).unwrap();
+                        let pos = todo!();
+                        player.position = todo!();
+                    },
+                    RequestType::GetPlayers => todo!(),
+                    RequestType::PlayerJoined => todo!(),
+                    RequestType::PlayerLeft => todo!(),
+                    RequestType::PlayerDisconnected => todo!(),
+                    RequestType::PlayerLogin => todo!(),
+                    RequestType::PlayerRegister => todo!(),
+                }
                 let data = &v[..bytes];
                 let str_data = String::from_utf8_lossy(&data).to_string();
                 println!("{:?}", str_data);
